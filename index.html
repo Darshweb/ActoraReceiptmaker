@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACTORA Enterprise - Secure Billing</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --dark: #0f172a;
+            --bg: #f8fafc;
+            --border: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            color: var(--dark);
+        }
+
+        /* Authentication Overlay */
+        #auth-screen {
+            position: fixed;
+            inset: 0;
+            background: var(--dark);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .auth-card {
+            background: #1e293b;
+            padding: 40px;
+            border-radius: 20px;
+            width: 350px;
+            text-align: center;
+        }
+
+        /* Layout */
+        .sidebar {
+            width: 400px;
+            background: white;
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            padding: 40px;
+            overflow-y: auto;
+            gap: 40px;
+        }
+
+        .panel { padding: 20px; }
+        .section-title { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: #94a3b8; margin: 20px 0 10px; }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
+        .btn {
+            cursor: pointer;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            width: 100%;
+            transition: 0.2s;
+            margin-bottom: 5px;
+        }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-history { background: #f1f5f9; color: var(--dark); font-size: 0.8rem; }
+
+        /* Receipt Styles */
+        #receipt-wrap { padding: 10px; background: #e2e8f0; border-radius: 8px; } /* Wrapper to ensure clean image capture */
+        #receipt-canvas {
+            background: white;
+            width: 350px;
+            padding: 30px;
+            font-family: 'Courier New', monospace;
+            height: fit-content;
+            color: #000;
+        }
+
+        .receipt-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        .receipt-table th { border-bottom: 1px solid #000; text-align: left; font-size: 0.8rem; }
+        .receipt-table td { padding: 5px 0; font-size: 0.8rem; }
+
+        .history-item {
+            font-size: 0.75rem;
+            padding: 10px;
+            border-bottom: 1px solid #f1f5f9;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        @media print {
+            .sidebar, .history-panel, #auth-screen { display: none !important; }
+            body { background: white; }
+            #receipt-wrap { padding: 0; background: transparent; }
+            #receipt-canvas { box-shadow: none; border: none; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="auth-screen">
+    <div class="auth-card">
+        <h1>ACTORA</h1>
+        <p>Merchant PIN (Default: 1234)</p>
+        <input type="password" id="pinInput" placeholder="Enter PIN" style="text-align: center;">
+        <button class="btn btn-primary" onclick="login()">Login</button>
+    </div>
+</div>
+
+<div class="sidebar">
+    <div class="panel">
+        <h2 style="color: var(--primary); margin: 0;">ACTORA Pro</h2>
+        
+        <div class="section-title">Store Profile</div>
+        <input type="text" id="storeName" oninput="sync()" value="ACTORA MARKET">
+        <input type="text" id="storeLoc" oninput="sync()" value="404 Galaxy Way, Mumbai">
+        <input type="text" id="storeGstin" oninput="sync()" value="GSTIN: 27AAACT0000A1Z5">
+
+        <div class="section-title">Billing</div>
+        <input type="text" id="itemName" placeholder="Item Name">
+        <div style="display:flex; gap:5px;">
+            <input type="number" id="itemPrice" placeholder="Price">
+            <input type="number" id="itemQty" value="1" style="width: 70px;">
+        </div>
+        <button class="btn btn-primary" onclick="addItem()">Add to Bill</button>
+
+        <div class="section-title">Tax & Cash</div>
+        <div style="display:flex; gap:5px;">
+            <input type="number" id="gstRate" oninput="sync()" value="18" placeholder="GST %">
+            <input type="number" id="cashReceived" oninput="calcChange()" placeholder="Cash Taken">
+        </div>
+
+        <div class="section-title">Actions</div>
+        <button class="btn btn-primary" style="background: black;" onclick="printReceipt()">🖨️ Print Receipt</button>
+        <button class="btn btn-success" onclick="saveAsJPG()">📸 Save as JPG</button>
+        <button class="btn" style="background: #ef4444; color: white;" onclick="resetBill()">🗑️ Reset Current Bill</button>
+        
+        <button class="btn btn-history" onclick="logout()" style="margin-top: 20px;">Secure Logout</button>
+    </div>
+</div>
+
+<div class="main-content">
+    <div id="receipt-wrap">
+        <div id="receipt-canvas">
+            <center>
+                <h3 id="rName" style="margin:0">ACTORA MARKET</h3>
+                <div id="rLoc" style="font-size: 0.7rem;"></div>
+                <div id="rGstin" style="font-size: 0.7rem;"></div>
+                <hr style="border: none; border-top: 1px solid #000; margin: 10px 0;">
+                <div id="rDate" style="font-size: 0.7rem;"></div>
+            </center>
+
+            <table class="receipt-table">
+                <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Total</th></tr></thead>
+                <tbody id="rBody"></tbody>
+            </table>
+
+            <div style="border-top: 1px dashed #000; padding-top: 10px; font-size: 0.8rem;">
+                <div style="display:flex; justify-content:space-between;"><span>Subtotal:</span><span id="rSub">0.00</span></div>
+                <div style="display:flex; justify-content:space-between;"><span id="taxLabel">GST (18%):</span><span id="rTax">0.00</span></div>
+                <div style="display:flex; justify-content:space-between; font-weight:bold; font-size: 1rem; margin-top:5px;">
+                    <span>GRAND TOTAL:</span><span id="rTotal">0.00</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:10px;"><span>Cash Recv:</span><span id="rCash">0.00</span></div>
+                <div style="display:flex; justify-content:space-between;"><span>Change:</span><span id="rChange">0.00</span></div>
+            </div>
+
+            <center id="rFooter" style="margin-top: 30px; font-size: 0.7rem; white-space: pre-line;">Thank you! Visit again.</center>
+        </div>
+    </div>
+
+    <div class="history-panel" style="width: 250px;">
+        <div class="section-title">Sales History</div>
+        <div id="historyList" style="background: white; border-radius: 10px; border: 1px solid var(--border); min-height: 200px;"></div>
+        <button class="btn btn-history" onclick="clearHistory()" style="color: red; margin-top: 10px;">Clear Logs</button>
+    </div>
+</div>
+
+<script>
+    let items = [];
+    let history = JSON.parse(localStorage.getItem('actora_history') || '[]');
+
+    function login() {
+        if(document.getElementById('pinInput').value === "1234") {
+            document.getElementById('auth-screen').style.display = 'none';
+            renderHistory();
+        } else { alert("Wrong PIN!"); }
+    }
+
+    function logout() { location.reload(); }
+
+    function sync() {
+        document.getElementById('rName').innerText = document.getElementById('storeName').value;
+        document.getElementById('rLoc').innerText = document.getElementById('storeLoc').value;
+        document.getElementById('rGstin').innerText = document.getElementById('storeGstin').value;
+        document.getElementById('taxLabel').innerText = `GST (${document.getElementById('gstRate').value}%):`;
+        render();
+    }
+
+    function addItem() {
+        const name = document.getElementById('itemName').value;
+        const price = parseFloat(document.getElementById('itemPrice').value);
+        const qty = parseInt(document.getElementById('itemQty').value);
+
+        if(!name || isNaN(price)) return;
+        items.push({ name: name.toUpperCase(), price, qty });
+        
+        document.getElementById('itemName').value = '';
+        document.getElementById('itemPrice').value = '';
+        document.getElementById('itemName').focus();
+        render();
+    }
+
+    function calcChange() {
+        const total = parseFloat(document.getElementById('rTotal').innerText);
+        const cash = parseFloat(document.getElementById('cashReceived').value) || 0;
+        const change = cash - total;
+        document.getElementById('rCash').innerText = cash.toFixed(2);
+        document.getElementById('rChange').innerText = Math.max(0, change).toFixed(2);
+    }
+
+    function render() {
+        const tbody = document.getElementById('rBody');
+        tbody.innerHTML = '';
+        let sub = 0;
+        items.forEach(i => {
+            let total = i.price * i.qty;
+            sub += total;
+            tbody.innerHTML += `<tr><td>${i.name}</td><td>${i.qty}</td><td style="text-align:right">${total.toFixed(2)}</td></tr>`;
+        });
+
+        const rate = parseFloat(document.getElementById('gstRate').value) / 100;
+        const tax = sub * rate;
+        const total = sub + tax;
+
+        document.getElementById('rSub').innerText = sub.toFixed(2);
+        document.getElementById('rTax').innerText = tax.toFixed(2);
+        document.getElementById('rTotal').innerText = total.toFixed(2);
+        document.getElementById('rDate').innerText = new Date().toLocaleString();
+        calcChange();
+    }
+
+    function saveToHistory() {
+        const record = {
+            date: new Date().toLocaleTimeString(),
+            total: document.getElementById('rTotal').innerText
+        };
+        history.unshift(record);
+        localStorage.setItem('actora_history', JSON.stringify(history.slice(0, 20)));
+        renderHistory();
+    }
+
+    function printReceipt() {
+        if(items.length === 0) return alert("Add items first!");
+        saveToHistory();
+        window.print();
+    }
+
+    async function saveAsJPG() {
+        if(items.length === 0) return alert("No items to save!");
+        const element = document.getElementById('receipt-canvas');
+        
+        // Use html2canvas to capture the receipt
+        const canvas = await html2canvas(element, {
+            scale: 2, // High quality
+            backgroundColor: "#ffffff"
+        });
+        
+        const image = canvas.toDataURL("image/jpeg", 0.9);
+        const link = document.createElement('a');
+        link.download = `ACTORA-Receipt-${Date.now()}.jpg`;
+        link.href = image;
+        link.click();
+        saveToHistory();
+    }
+
+    function renderHistory() {
+        const container = document.getElementById('historyList');
+        container.innerHTML = history.map(h => `
+            <div class="history-item">
+                <span>${h.date}</span>
+                <span style="font-weight:bold">₹${h.total}</span>
+            </div>
+        `).join('');
+    }
+
+    function resetBill() {
+        items = [];
+        document.getElementById('cashReceived').value = '';
+        render();
+    }
+
+    function clearHistory() {
+        if(confirm("Clear all logs?")) {
+            history = [];
+            localStorage.removeItem('actora_history');
+            renderHistory();
+        }
+    }
+
+    sync();
+</script>
+
+</body>
+</html>
